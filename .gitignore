@@ -1,0 +1,17 @@
+# Node
+node_modules/
+npm-debug.log
+
+# Env files
+.env
+
+# React
+frontend/node_modules/
+frontend/build/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Upload artifacts
+backend/uploads/
