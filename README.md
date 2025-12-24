@@ -5,6 +5,19 @@ Features include 5 MB chunking, concurrent uploads, exponential-backoff retries,
 
 ---
 
+## Features
+
+- 5 MB fixed-size chunking
+- Concurrent uploads (3 parallel chunks)
+- Retry with exponential backoff
+- Pause & resume using handshake protocol
+- Streaming writes to a pre-allocated file on disk
+- Streaming SHA-256 file integrity verification
+- Best-effort ZIP metadata inspection
+- Crash-safe and idempotent backend logic
+
+---
+
 ## Repository layout
 
 ```
@@ -321,5 +334,101 @@ Invoke-RestMethod -Uri http://localhost:4000/api/finalize -Method POST -ContentT
 - **Partial writes**: server only marks `RECEIVED` after write completes; incomplete chunk will be retried by client on resume.
 - **Non-ZIP files**: ZIP inspection is best-effort; non-ZIP results simply produce an empty `files` array.
 - **Double-finalize**: handled by row-locking and state checks.
+
+---
+
+## File Integrity Handling (Hashing)
+
+File integrity is ensured using **SHA-256 hashing** on the backend during the finalization step.
+
+- The server computes the hash using Node.js streams (`crypto.createHash('sha256')`).
+- The entire file is **never loaded into memory**; instead, it is streamed from disk.
+- Hashing occurs **only after all chunks have been successfully received**.
+- The computed SHA-256 hash is:
+  - Returned to the client
+  - Persisted in the `uploads.final_hash` column in the database
+
+This guarantees that the reconstructed file exactly matches the original uploaded content.
+
+---
+
+## Pause & Resume Logic
+
+Pause and resume functionality is implemented using a **handshake-based protocol** combined with persistent chunk metadata stored in MySQL.
+
+### How it works:
+
+1. Before uploading, the client sends a `POST /api/handshake` request containing:
+   - Filename
+   - Total file size
+   - Chunk size
+
+2. The server:
+   - Creates (or resumes) an upload entry
+   - Returns an `uploadId`
+   - Returns a list of already received chunk indices (`receivedChunks`)
+
+3. The client:
+   - Slices the file into chunks
+   - Skips uploading chunks already marked as received
+   - Uploads only pending chunks
+
+### Benefits:
+
+- Upload can resume after:
+  - Browser refresh
+  - Network disconnection
+  - Backend crash or restart
+- Resume works even across sessions, because state is stored in the database
+- No duplicate data is written due to idempotent chunk handling
+
+---
+
+## Known Trade-offs
+
+The following trade-offs were made to balance complexity, performance, and clarity:
+
+- **No per-chunk checksums**  
+  Chunk integrity is inferred from successful write completion rather than per-chunk hashing.
+
+- **No authentication or user accounts**  
+  The system assumes a trusted environment, as authentication was outside the assignment scope.
+
+- **Single-node storage**  
+  Uploaded files are stored on local disk rather than distributed object storage (e.g., S3).
+
+- **Best-effort ZIP inspection**  
+  ZIP metadata inspection is optional and non-fatal; invalid ZIPs do not block upload completion.
+
+- **Development-focused CORS policy**  
+  CORS is permissive for local development and should be restricted in production.
+
+---
+
+## Further Enhancements
+
+Several improvements can be made beyond the current implementation:
+
+- Add per-chunk checksums for stronger corruption detection
+- Support pause/resume buttons in the UI
+- Store uploads in cloud object storage (e.g., S3 multipart upload)
+- Add authentication and per-user upload quotas
+- Implement upload expiration and background cleanup jobs
+- Support resumable uploads across multiple backend instances
+- Improve frontend UX with speed (MB/s) and ETA indicators
+- Add automated tests for backend APIs
+
+---
+
+## Summary
+
+This project implements a robust, resumable file upload system using:
+
+- Streaming I/O for scalability
+- Database-backed state for fault tolerance
+- Concurrency and retries for performance and reliability
+- Strong file integrity guarantees via SHA-256 hashing
+
+The design emphasizes correctness, resumability, and resilience to failures.
 
 ---
